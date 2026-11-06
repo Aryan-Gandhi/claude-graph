@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph · live work view</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --line: #e2e5ea;
+    --text: #151a22; --muted: #667085;
+    --accent: #5b5bd6;
+    --run: #2563eb; --done: #16a34a; --block: #dc2626; --review: #d97706; --pend: #98a2b3;
+    --run-bg: #e8f0fe; --done-bg: #e6f6ec; --block-bg: #fdecec; --review-bg: #fef3e0; --pend-bg: #eef0f3;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1116; --panel: #161b22; --panel-2: #1d232c; --line: #2a313c;
+      --text: #e6e9ef; --muted: #8b95a5;
+      --accent: #8b8bf5;
+      --run: #5b9bff; --done: #3ccf6e; --block: #ff6b6b; --review: #f5a623; --pend: #6b7686;
+      --run-bg: #14233d; --done-bg: #12281a; --block-bg: #331616; --review-bg: #33250e; --pend-bg: #1d232c;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1d232c; --line: #2a313c;
+    --text: #e6e9ef; --muted: #8b95a5; --accent: #8b8bf5;
+    --run: #5b9bff; --done: #3ccf6e; --block: #ff6b6b; --review: #f5a623; --pend: #6b7686;
+    --run-bg: #14233d; --done-bg: #12281a; --block-bg: #331616; --review-bg: #33250e; --pend-bg: #1d232c;
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  header { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+  .goal { color: var(--muted); margin-top: 2px; max-width: 70ch; }
+  .meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--done); }
+  .dot.stale { background: var(--review); }
+  .dot.off { background: var(--block); }
+  .live.on .dot { animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,.5);} 70% { box-shadow: 0 0 0 7px rgba(22,163,74,0);} 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0);} }
+  button.ghost { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+
+  .progress { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); margin-bottom: 20px; }
+  .progress-top { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .big { font-size: 28px; font-weight: 700; letter-spacing: -.02em; }
+  .big small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .bar { height: 10px; border-radius: 999px; background: var(--panel-2); overflow: hidden; display: flex; }
+  .bar span { display: block; height: 100%; transition: width .5s ease; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 6px; vertical-align: baseline; }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .col > section { margin-bottom: 24px; }
+
+  /* plan spine */
+  .steps { list-style: none; margin: 0; padding: 0; position: relative; }
+  .step { position: relative; display: flex; gap: 12px; padding: 0 0 14px 0; }
+  .step:not(:last-child)::before { content: ""; position: absolute; left: 11px; top: 24px; bottom: 0; width: 2px; background: var(--line); }
+  .node { flex: 0 0 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; background: var(--pend); z-index: 1; }
+  .step.done .node { background: var(--done); }
+  .step.running .node { background: var(--run); animation: pulseb 1.6s infinite; }
+  .step.blocked .node { background: var(--block); }
+  .step.review .node { background: var(--review); }
+  @keyframes pulseb { 0% { box-shadow: 0 0 0 0 rgba(37,99,235,.45);} 70% { box-shadow: 0 0 0 8px rgba(37,99,235,0);} 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0);} }
+  .step-body { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow); }
+  .step.running .step-body { border-color: var(--run); }
+  .step.review .step-body { border-color: var(--review); }
+  .step.blocked .step-body { border-color: var(--block); }
+  .step-title { font-weight: 600; }
+  .step.done .step-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+  .step-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .chip.running { color: var(--run); background: var(--run-bg); }
+  .chip.done { color: var(--done); background: var(--done-bg); }
+  .chip.blocked { color: var(--block); background: var(--block-bg); }
+  .chip.review { color: var(--review); background: var(--review-bg); }
+  .chip.pending { color: var(--pend); background: var(--pend-bg); }
+  .chip.waiting { color: #fff; background: var(--block); }
+  .agent.waiting, .orch.waiting { border-color: var(--block); box-shadow: 0 0 0 2px var(--block-bg); }
+  .quiet { font-weight: 600; }
+  .quiet.warn { color: var(--review); }
+  .quiet.bad { color: var(--block); }
+  .banner { display: flex; align-items: flex-start; gap: 10px; background: var(--block-bg); border: 1px solid var(--block); color: var(--text);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
+  .banner[hidden] { display: none; }
+  .banner b { color: var(--block); }
+  .banner ul { margin: 4px 0 0; padding-left: 18px; }
+  .chip.running::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* orchestrator + agents */
+  .orch { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .orch-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .orch-name { font-weight: 700; }
+  .orch-doing { color: var(--muted); margin-top: 4px; }
+  .agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; position: relative; }
+  .agent { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
+  .agent.running { border-color: var(--run); }
+  .agent.blocked { border-color: var(--block); }
+  .agent-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .agent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-type { font-size: 11px; color: var(--muted); }
+  .agent-doing { font-size: 13px; min-height: 2.7em; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .agent-foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* validation */
+  .val { background: var(--panel); border: 1px solid var(--review); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; box-shadow: var(--shadow); }
+  .val-title { font-weight: 600; }
+  .val-ev { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel-2); border-radius: 8px; padding: 8px 10px; margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+  .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
+
+  [hidden] { display: none !important; }
+
+  /* narrow screens + long unbroken text */
+  .agents { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
+  .step-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 8px; align-items: flex-start; }
+  .step-title, .step-sub, .goal, .orch-doing, .agent-doing, .val-title { overflow-wrap: anywhere; }
+  .agent-foot { flex-wrap: wrap; gap: 2px 8px; }
+  .chip.pending { color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+  /* hover card */
+  [data-key] { cursor: default; }
+  [data-key]:hover, [data-key]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #pop { position: fixed; z-index: 50; width: min(380px, calc(100vw - 24px)); max-height: 60vh; overflow: auto; pointer-events: none;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25); font-size: 13px; line-height: 1.5; }
+  #pop[hidden] { display: none; }
+  #pop h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  #pop h4 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #pop p { margin: 4px 0; }
+  #pop ul { margin: 4px 0; padding-left: 18px; }
+  #pop code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+  #pop pre { margin: 6px 0; background: var(--panel-2); border-radius: 8px; padding: 8px 10px; overflow: auto; }
+  #pop pre code { background: none; padding: 0; }
+
+  #nostate { display: none; text-align: center; padding: 80px 16px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="nostate"><h1>Waiting for data…</h1><p>Run <code>/graph</code> in Claude Code to fill this page.</p></div>
+  <div id="app" hidden>
+    <header>
+      <div>
+        <h1 id="project">Project</h1>
+        <div class="goal" id="goal"></div>
+      </div>
+      <div class="meta">
+        <span class="live on" id="live"><span class="dot" id="dot"></span><span id="liveText">live</span></span>
+        <button class="ghost" id="theme" title="Toggle light / dark">Theme</button>
+      </div>
+    </header>
+
+    <div class="banner" id="banner" role="alert" hidden></div>
+    <div class="banner" id="err" hidden></div>
+
+    <div class="progress">
+      <div class="progress-top">
+        <div class="big"><span id="pct">0%</span><small id="frac"></small></div>
+        <div class="chip running" id="eta" hidden></div>
+      </div>
+      <div class="bar" id="bar" role="progressbar" aria-label="Plan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="grid">
+      <div class="col">
+        <section>
+          <h2>Plan</h2>
+          <ol class="steps" id="steps"></ol>
+        </section>
+      </div>
+      <div class="col">
+        <section>
+          <h2>Orchestrator</h2>
+          <div class="orch" id="orch"></div>
+        </section>
+        <section>
+          <h2>Agents <span id="agentCount" style="font-weight:400"></span></h2>
+          <div class="agents" id="agents"></div>
+        </section>
+        <section>
+          <h2>Needs your validation</h2>
+          <div id="validate"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="pop" role="tooltip" hidden></div>
+
+<script>
+(function () {
+  var STATE = null, loadedAt = 0, lastJson = "", hoverKey = null, mouseX = 0, mouseY = 0;
+  var loading = false, offline = false, popKey = null;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); };
+  var LABEL = { pending: "Pending", running: "Running", done: "Done", blocked: "Blocked", review: "Needs you", waiting: "Waiting for you" };
+  var QUIET_WARN = 180, QUIET_BAD = 900; // seconds without any event from a running agent
+  var COLOR = { done: "var(--done)", running: "var(--run)", review: "var(--review)", blocked: "var(--block)", pending: "var(--pend)" };
+
+  function fmt(sec) {
+    if (sec == null || isNaN(sec) || sec < 0) return "";
+    sec = Math.floor(sec);
+    var m = Math.floor(sec / 60), s = sec % 60, h = Math.floor(m / 60);
+    if (h) return h + "h " + (m % 60) + "m";
+    if (m) return m + "m " + s + "s";
+    return s + "s";
+  }
+  function elapsed(a) {
+    var start = a.startedAt ? Date.parse(a.startedAt) : NaN;
+    if (isNaN(start)) return "";
+    var end = (a.status === "done" && a.finishedAt) ? Date.parse(a.finishedAt) : Date.now();
+    return fmt((end - start) / 1000);
+  }
+
+  // tiny, safe markdown: headings, bullets, **bold**, `code`, fenced blocks. Everything is escaped first.
+  function inline(t) {
+    return esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  }
+  function md(src) {
+    var out = [], inList = false, inCode = false, code = [];
+    String(src || "").split("\n").forEach(function (line) {
+      if (/^```/.test(line)) {
+        if (inCode) { out.push("<pre><code>" + esc(code.join("\n")) + "</code></pre>"); code = []; inCode = false; }
+        else { if (inList) { out.push("</ul>"); inList = false; } inCode = true; }
+        return;
+      }
+      if (inCode) { code.push(line); return; }
+      var li = line.match(/^\s*[-*]\s+(.*)/), h = line.match(/^#{1,4}\s+(.*)/);
+      if (li) { if (!inList) { out.push("<ul>"); inList = true; } out.push("<li>" + inline(li[1]) + "</li>"); return; }
+      if (inList) { out.push("</ul>"); inList = false; }
+      if (h) out.push("<h4>" + inline(h[1]) + "</h4>");
+      else if (line.trim()) out.push("<p>" + inline(line) + "</p>");
+    });
+    if (inCode) out.push("<pre><code>" + esc(code.join("\n")) + "</code></pre>");
+    if (inList) out.push("</ul>");
+    return out.join("");
+  }
+
+  function findItem(key) {
+    if (!STATE || !key) return null;
+    var parts = key.split(":"), kind = parts[0], id = parts.slice(1).join(":");
+    if (kind === "step") { var s = (STATE.steps || []).filter(function (x) { return String(x.id) === id; })[0]; return s && { kind: kind, item: s }; }
+    if (kind === "agent") { var a = (STATE.agents || []).filter(function (x) { return String(x.id) === id; })[0]; return a && { kind: kind, item: a }; }
+    if (kind === "orch") return { kind: kind, item: STATE.orchestrator || {} };
+    return null;
+  }
+  function detailFor(f) {
+    var it = f.item, title = f.kind === "step" ? it.title : f.kind === "agent" ? it.name : "Main agent";
+    var body = it.detail;
+    if (!body) {
+      var l = [];
+      if (f.kind === "agent") { if (it.type) l.push("- **Type:** `" + it.type + "`"); if (it.stepId) l.push("- **Plan step:** " + it.stepId); if (it.doing) l.push("\n#### Doing now\n" + it.doing); }
+      if (f.kind === "step") { if (it.agent) l.push("- **Agent:** " + it.agent); if (it.note) l.push("\n#### Note\n" + it.note); if (it.evidence) l.push("\n#### Evidence\n```\n" + it.evidence + "\n```"); }
+      if (f.kind === "orch" && it.doing) l.push(it.doing);
+      body = l.join("\n") || "_No details yet._";
+    }
+    return "<h3><span>" + esc(title) + "</span>" + (it.status ? chip(it.status) : "") + "</h3>" + md(body);
+  }
+  function showPop(reposition) {
+    var pop = $("pop"), f = findItem(hoverKey);
+    if (!f) { pop.hidden = true; popKey = null; return; }
+    if (!reposition || popKey !== hoverKey || pop.hidden) { pop.innerHTML = detailFor(f); popKey = hoverKey; }
+    pop.hidden = false;
+    var w = pop.offsetWidth, h = pop.offsetHeight, x = mouseX + 16, y = mouseY + 16;
+    if (x + w > innerWidth - 8) x = Math.max(8, mouseX - w - 16);
+    if (y + h > innerHeight - 8) y = Math.max(8, innerHeight - h - 8);
+    pop.style.left = x + "px"; pop.style.top = y + "px";
+  }
+  document.addEventListener("mousemove", function (e) {
+    mouseX = e.clientX; mouseY = e.clientY;
+    var el = e.target.closest ? e.target.closest("[data-key]") : null, k = el ? el.getAttribute("data-key") : null;
+    if (k !== hoverKey) { hoverKey = k; showPop(); } else if (k) { showPop(true); }
+  });
+  document.addEventListener("focusin", function (e) {
+    var el = e.target.closest && e.target.closest("[data-key]");
+    if (el) { var r = el.getBoundingClientRect(); mouseX = r.left + 24; mouseY = r.bottom - 8; hoverKey = el.getAttribute("data-key"); showPop(); }
+  });
+  document.addEventListener("focusout", function () { hoverKey = null; showPop(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") { hoverKey = null; showPop(); } });
+
+  function chip(status) { return '<span class="chip ' + esc(status) + '">' + esc(LABEL[status] || status) + "</span>"; }
+
+  // make any state.js shape safe to draw: missing ids, odd statuses, non-array lists
+  function normalize(raw) {
+    var s = raw && typeof raw === "object" ? raw : {};
+    var ok = function (x) { return x && typeof x === "object"; };
+    var steps = (Array.isArray(s.steps) ? s.steps : []).filter(ok).map(function (x, i) {
+      var o = Object.assign({}, x);
+      o.id = o.id != null && o.id !== "" ? String(o.id) : "s" + (i + 1);
+      if (!LABEL[o.status] || o.status === "waiting") o.status = "pending";
+      o.title = o.title != null ? String(o.title) : "(untitled step)";
+      return o;
+    });
+    var agents = (Array.isArray(s.agents) ? s.agents : []).filter(ok).map(function (x, i) {
+      var o = Object.assign({}, x);
+      o.id = o.id != null && o.id !== "" ? String(o.id) : "a" + (i + 1);
+      if (!LABEL[o.status]) o.status = "pending";
+      o.name = o.name != null ? String(o.name) : "agent";
+      return o;
+    });
+    return Object.assign({}, s, { steps: steps, agents: agents, orchestrator: ok(s.orchestrator) ? s.orchestrator : {} });
+  }
+
+  function safeRender() {
+    var err = $("err");
+    try { render(); err.hidden = true; }
+    catch (e) { err.hidden = false; err.innerHTML = "<div><b>Could not draw this update</b><br>" + esc(e && e.message) + ". The page keeps retrying.</div>"; }
+  }
+
+  function render() {
+    var s = STATE;
+    if (!s) { $("nostate").style.display = "block"; $("app").hidden = true; return; }
+    $("nostate").style.display = "none"; $("app").hidden = false;
+
+    var steps = s.steps || [], agents = s.agents || [];
+    document.title = (s.project || "Graph") + " · live work";
+    $("project").textContent = s.project || "Project";
+    $("goal").textContent = s.goal || "";
+
+    // progress
+    var counts = { done: 0, running: 0, review: 0, blocked: 0, pending: 0 };
+    steps.forEach(function (st) { counts[st.status] = (counts[st.status] || 0) + 1; });
+    var total = steps.length || 1;
+    var pct = Math.round((counts.done / total) * 100);
+    $("pct").textContent = pct + "%";
+    $("bar").setAttribute("aria-valuenow", pct);
+    $("frac").textContent = counts.done + " of " + steps.length + " steps done";
+    var order = ["done", "review", "running", "blocked", "pending"];
+    $("bar").innerHTML = order.map(function (k) {
+      return counts[k] ? '<span style="width:' + (counts[k] / total * 100) + '%;background:' + COLOR[k] + '"></span>' : "";
+    }).join("");
+    $("legend").innerHTML = order.map(function (k) {
+      return '<span><i style="background:' + COLOR[k] + '"></i>' + LABEL[k] + " " + (counts[k] || 0) + "</span>";
+    }).join("");
+    var runningAgents = agents.filter(function (a) { return a.status === "running"; }).length;
+    if (runningAgents) { $("eta").hidden = false; $("eta").textContent = runningAgents + " agent" + (runningAgents > 1 ? "s" : "") + " working now"; } else { $("eta").hidden = true; }
+
+    // steps
+    $("steps").innerHTML = steps.map(function (st, i) {
+      var node = st.status === "done" ? "✓" : st.status === "blocked" ? "!" : (i + 1);
+      var sub = [];
+      if (st.agent) sub.push("Agent: " + esc(st.agent));
+      if (st.note) sub.push(esc(st.note));
+      return '<li class="step ' + esc(st.status) + '" data-key="step:' + esc(st.id) + '" tabindex="0" role="group" aria-label="' + esc(st.title + ", " + (LABEL[st.status] || st.status)) + '"><div class="node">' + node + '</div><div class="step-body">' +
+        '<div class="step-row"><div class="step-title">' + esc(st.title) + "</div>" + chip(st.status) + "</div>" +
+        (sub.length ? '<div class="step-sub">' + sub.join(" · ") + "</div>" : "") + "</div></li>";
+    }).join("") || '<div class="empty">No plan steps yet.</div>';
+
+    // orchestrator
+    var o = s.orchestrator || {};
+    $("orch").setAttribute("data-key", "orch:main"); $("orch").setAttribute("tabindex", "0");
+    $("orch").className = "orch" + (o.status === "waiting" ? " waiting" : "");
+    $("orch").innerHTML = '<div class="orch-head"><span class="orch-name">Main agent</span>' + chip(o.status || "running") + "</div>" +
+      '<div class="orch-doing">' + esc(o.waiting || o.doing || "Coordinating work") +
+      ' <span class="quiet" data-run="' + (o.status === "running" ? 1 : 0) + '" data-last="' + esc(o.lastEventAt || "") + '"></span></div>';
+
+    // banner + tab title: who is waiting for you in the CLI
+    var waits = [];
+    if (o.status === "waiting") waits.push("Main agent: " + (o.waiting || "needs your attention"));
+    agents.forEach(function (a) { if (a.status === "waiting") waits.push(a.name + ": " + (a.waiting || "needs your attention")); });
+    var bn = $("banner");
+    if (waits.length) {
+      bn.hidden = false;
+      bn.innerHTML = "<div><b>Needs you in the CLI</b><ul>" + waits.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul></div>";
+      document.title = "(" + waits.length + ") needs you · " + (s.project || "Graph");
+    } else { bn.hidden = true; }
+
+    // agents
+    $("agentCount").textContent = agents.length ? "(" + agents.length + ")" : "";
+    $("agents").innerHTML = agents.map(function (a) {
+      return '<div class="agent ' + esc(a.status) + '" data-key="agent:' + esc(a.id) + '" tabindex="0" role="group" aria-label="' + esc(a.name + ", " + (LABEL[a.status] || a.status)) + '"><div class="agent-head"><span class="agent-name" title="' + esc(a.name) + '">' + esc(a.name) + "</span>" + chip(a.status) + "</div>" +
+        (a.type ? '<div class="agent-type">' + esc(a.type) + "</div>" : "") +
+        '<div class="agent-doing">' + esc(a.waiting || a.doing || "") + "</div>" +
+        '<div class="agent-foot"><span>' + (a.stepId ? "Step " + esc(a.stepId) : "") + '</span><span class="quiet" data-run="' + (a.status === "running" ? 1 : 0) + '" data-last="' + esc(a.lastEventAt || "") + '"></span><span class="el" data-agent="' + esc(a.id) + '">' + elapsed(a) + "</span></div></div>";
+    }).join("") || '<div class="empty" style="grid-column:1/-1">No subagents running. The main agent is working alone.</div>';
+
+    // validation
+    var rev = steps.filter(function (st) { return st.status === "review"; });
+    $("validate").innerHTML = rev.map(function (st) {
+      return '<div class="val"><div class="val-title">' + esc(st.title) + "</div>" +
+        (st.note ? '<div class="step-sub">' + esc(st.note) + "</div>" : "") +
+        (st.evidence ? '<div class="val-ev">' + esc(st.evidence) + "</div>" : "") + "</div>";
+    }).join("") || '<div class="empty">Nothing waiting on you.</div>';
+
+    tickLive();
+  }
+
+  function tickLive() {
+    if (!STATE) return;
+    var upd = Date.parse(STATE.updatedAt), age = isNaN(upd) ? null : (Date.now() - upd) / 1000;
+    var dot = $("dot"), live = $("live"), txt = $("liveText");
+    dot.className = "dot"; live.className = "live";
+    if (offline) { txt.textContent = "offline · can't read state.js"; dot.classList.add("off"); return; }
+    if (age == null) { txt.textContent = "no timestamp in data"; dot.classList.add("stale"); return; }
+    if (age < 90) { txt.textContent = "updated " + fmt(age) + " ago"; live.classList.add("on"); }
+    else if (age < 900) { txt.textContent = "updated " + fmt(age) + " ago"; dot.classList.add("stale"); }
+    else { txt.textContent = "stale · last update " + fmt(age) + " ago"; dot.classList.add("off"); }
+  }
+
+  function load() {
+    if (loading) return; // previous read still in flight: don't stack script tags
+    loading = true;
+    var tag = document.createElement("script");
+    tag.src = "state.js?t=" + Date.now();
+    var done = function () { loading = false; tag.remove(); };
+    tag.onload = function () {
+      offline = false;
+      if (window.GRAPH_STATE) {
+        var j = JSON.stringify(window.GRAPH_STATE);
+        STATE = normalize(window.GRAPH_STATE); loadedAt = Date.now();
+        if (j !== lastJson) { lastJson = j; safeRender(); popKey = null; if (hoverKey) showPop(); }
+      }
+      done();
+    };
+    tag.onerror = function () { offline = true; done(); if (!STATE) render(); tickLive(); };
+    document.head.appendChild(tag);
+  }
+
+  $("theme").onclick = function () {
+    var root = document.documentElement, cur = root.getAttribute("data-theme");
+    var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("graph-theme", next); } catch (e) {}
+  };
+  try { var t = localStorage.getItem("graph-theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+
+  load();
+  setInterval(load, 2000);
+  // per-second tick: update timers and the "updated Xs ago" text only, so hovering never flickers
+  setInterval(function () {
+    if (!STATE) return;
+    (STATE.agents || []).forEach(function (a) {
+      var el = document.querySelector('.el[data-agent="' + String(a.id).replace(/"/g, "") + '"]');
+      if (el) el.textContent = elapsed(a);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".quiet"), function (q) {
+      var last = Date.parse(q.getAttribute("data-last")), run = q.getAttribute("data-run") === "1";
+      var age = isNaN(last) ? null : (Date.now() - last) / 1000;
+      q.className = "quiet"; q.textContent = "";
+      if (!run || age == null || age < QUIET_WARN) return;
+      if (age >= QUIET_BAD) { q.className = "quiet bad"; q.textContent = "possibly stuck · quiet " + fmt(age); }
+      else { q.className = "quiet warn"; q.textContent = "quiet " + fmt(age); }
+    });
+    tickLive();
+  }, 1000);
+})();
+</script>
+</body>
+</html>
